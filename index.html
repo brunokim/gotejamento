@@ -1,0 +1,383 @@
+<!DOCTYPE HTML>
+<html manifest="cache-manifest">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width">
+    <style>
+        body {
+            width: 90%;
+            background-color: white;
+            margin: 5% auto;
+            font-size: 18pt;
+            font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif
+        }
+        header {
+            margin: 0;
+            background-color: hsl(65, 18%, 88%);
+            padding: 0 5px;
+        }
+        .flow-input {
+            background-color: transparent;
+            border-width: 2px 2px 2px 2px;
+            border-color: transparent transparent black transparent;
+            text-align: right;
+            width: 10ch;
+        }
+        .locked {
+            border-color: black;
+        }
+        .tab-bar {
+            align-self: flex-start;
+            border: 0;
+            margin: 0
+        }
+        .tab {
+            border-top-left-radius: 3px;
+            border-top-right-radius: 3px;
+            padding: 3px 6px;
+            background-color: #dbdbe6;
+            box-shadow: none;
+            border: 0;
+            margin: 0;
+            font-size: 12pt;
+            
+        }
+        .selected {
+            background-color: #b3b3ca;
+        }
+        .content {
+            background-color: #b3b3ca;
+            padding: 5px;
+        }
+        .hidden {
+            display: none;
+        }
+        .menu {
+            display: flex;
+            align-items: flex-end;
+        }
+        .menu-button.menu-on {
+            transform: rotate(90);
+            transition: transform 0.5s
+        }
+        .menu-button.menu-off {
+            transform: rotate(-90);
+            transition: transform 0.5s
+        }
+        .menu-row {
+            text-align: center;
+            max-width: 400px;
+        }
+        .menu-row.menu-on {
+            height: auto;
+            transition: height 0.5s;
+        }
+        .menu-row.menu-off {
+            height: 0;
+            transition: height 0.5s;
+        }
+        #measure-controls {
+            text-align: center;
+        }
+        #drop {
+            display: block;
+            margin: 0 auto;
+            height: 100pt;
+            width: 100pt;
+            font-size: 50pt;
+            border-radius: 100%;
+            border-color: transparent;
+        }
+        #pause, #zero {
+            display: inline-block;
+            width: 30pt;
+            height: 15pt;
+            font-size: 10pt;
+            margin: 0 10pt;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <span>Gotejamento</span>
+        <button id="menu-button" class="menu-off" aria-label="Menu">&#9776;</button>
+        <section class="menu-row menu-off">
+            <a href="#how-to">Como usar</a>
+        </section>
+    </header>
+    <section id="tab-controller" class="tab-bar">
+        <button id="calculator-tab-selector"
+                data-show="calculator"
+                class="tab selected"
+                aria-label="Exibir calculadora de conversão entre gotejamento e vazão">Calculadora</button>
+        <button id="measure-tab-selector"
+                data-show="measure"
+                class="tab"
+                aria-label="Exibir interface para medir a vazão de um equipo">Medir vazão</button>
+    </section>
+    <main class="content">
+        <div id="calculator">
+            <div>
+                <label for="dpm-calc">Gotejamento: </label>
+                <input class="flow-input" type="number" id="dpm-calc">
+                <span class="dpm-unit">gotas por minuto</span>
+            </div>
+            <div>
+                <label for="mlph-calc">Vazão: </label>
+                <input class="flow-input" type="number" id="mlph-calc">
+                <span>ml/h</span>
+            </div>
+        </div>
+        <div id="measure" class="hidden">
+            <div>
+                <label for="dpm">Gotejamento: </label>
+                <span id="dpm">0</span>
+                <span class="dpm-unit">gotas por minuto</span>
+            </div>
+            <div>
+                <label for="mlph">Vazão: </label>
+                <span id="mlph">0</span>
+                <span>ml/h</span>
+            </div>
+            <div id="measure-controls">
+                    <button id="drop">💧</button>
+                    <button id="pause" disabled>⏸</button>
+                    <button id="zero" disabled>⏹</button>
+            </div>
+            <div>
+                <h2>Intervalos</h2>
+                <ol id="drop_times"></ol>
+            </div>
+        </div>
+        <div id="drop-size-controller">
+            <div>
+                <label for="macrodrop">Macrogota</label>
+                <input type="radio" name="drop-size" value="macro" id="macrodrop" checked>
+            </div>
+            <div>
+                <label for="microdrop">Microgota</label>
+                <input type="radio" name="drop-size" value="micro" id="microdrop">
+            </div>
+        </div>
+    </main>
+    <script>
+        const MILLISECS_PER_SEC = 1000
+        const SECS_PER_MINUTE = 60
+        const MINUTES_PER_HOUR = 60
+        const MACRODROPS_PER_MILLILITERS = 20
+        const MICRODROPS_PER_MACRODROP = 3
+
+        // Menu controller
+        let menuButton = document.getElementById("menu-button")
+        menuButton.onclick = function toggleMenuOnClick() {
+            let fromClass, toClass
+            if (menuButton.classList.contains("menu-off")) {
+                fromClass = "menu-off"
+                toClass = "menu-on"
+            } else {
+                fromClass = "menu-on"
+                toClass = "menu-off"
+            }
+            menuButton.classList.add(toClass)
+            menuButton.classList.remove(fromClass)
+            
+            let menuItems = document.getElementsByClassName("menu-row")
+            for (let i = 0; i < menuItems.length; i++) {
+                let item = menuItems[i]
+                item.classList.add(toClass)
+                item.classList.remove(fromClass)
+            }
+        }
+
+        // Tab controller
+        let tabController = document.getElementById("tab-controller")
+        let tabs = tabController.getElementsByClassName("tab")
+        function displayTabs(selectorId) {
+            // Edge v17 and lower doesn't support for-of iteration over
+            // HTMLCollections: https://stackoverflow.com/a/22754453
+            for (let i = 0; i < tabs.length; i++) {
+                let tab = tabs[i]
+
+                let selectedId = tab.dataset.show
+                let content = document.getElementById(selectedId)
+                if (tab.id == selectorId) {
+                    tab.classList.add("selected")
+                    content.classList.remove("hidden")
+                } else {
+                    tab.classList.remove("selected")
+                    content.classList.add("hidden")
+                }
+            }
+        }
+        tabController.onclick = function switchTabs(e) {
+            let selectorId = e.target.id
+            localStorage.setItem('tab-selector-id', selectorId)
+            displayTabs(selectorId)
+        }
+        
+        // Drop size controller
+        let dropController = document.getElementById("drop-size-controller")
+        let microdrop = document.getElementById("microdrop")
+        let macrodrop = document.getElementById("macrodrop")
+        function drops_per_ml() {
+            if (microdrop.checked) {
+                return MICRODROPS_PER_MACRODROP * MACRODROPS_PER_MILLILITERS
+            }
+            return MACRODROPS_PER_MILLILITERS
+        }
+        function displayDropRateUnit() {
+            let unit_name = microdrop.checked ? "microgotas" : "gotas"
+            unit_name += " por minuto"
+            for (let element of document.getElementsByClassName("dpm-unit")) {
+                element.innerHTML = unit_name
+            }
+        }
+        dropController.oninput = function dropChanged(e) {
+            localStorage.setItem('drop-unit', e.target.value)
+
+            displayDropRateUnit()
+            // Change the other calculator input that is not locked.
+            lockedInput.oninput()
+            // Change the flow rate for measure tab.
+            redrawMeasure()
+        }
+
+        // Calculator
+        let calculatorEl = document.getElementById("calculator")
+        let dpmCalcInput = document.getElementById("dpm-calc")
+        let mlphCalcInput = document.getElementById("mlph-calc")
+        let inputs = [dpmCalcInput, mlphCalcInput]
+        let lockedInput = dpmCalcInput
+        function calculatorChanged(e) {
+            for (let input of inputs) {
+                if (input == e.target) {
+                    lockedInput = input
+                    input.classList.add("locked")
+                } else {
+                    input.classList.remove("locked")
+                }
+            }
+        }
+        calculatorEl.onchange = calculatorChanged
+        calculatorEl.oninput = calculatorChanged
+
+        dpmCalcInput.oninput = function setFlowFromDropRate() {
+            let drops_per_min = dpmCalcInput.value|0
+            let flow_ml_per_hour = drops_per_min / drops_per_ml() * MINUTES_PER_HOUR
+            mlphCalcInput.value = flow_ml_per_hour|0
+        }
+        mlphCalcInput.oninput = function setDropRateFromFlow() {
+            let flow_ml_per_hour = mlphCalcInput.value|0
+            let drop_per_min = flow_ml_per_hour * drops_per_ml() / MINUTES_PER_HOUR
+            dpmCalcInput.value = drop_per_min|0
+        }
+
+        // Medir vazao
+        let drop_times = []
+        let dropBtn = document.getElementById("drop")
+        let pauseBtn = document.getElementById("pause")
+        let zeroBtn = document.getElementById("zero")
+        let state = "STOPPED"
+        let startTime = null
+        let pauseTime = null
+        dropBtn.onclick = function(e) {
+            switch(state) {
+                case "STOPPED":
+                    state = "STARTED"
+                    dropBtn.innerHTML = "💧"
+                    pauseBtn.disabled = false
+                    zeroBtn.disabled = false
+                    startTime = Date.now()
+                    break
+                case "PAUSED":
+                    break
+                case "STARTED":
+                    let now = Date.now()
+                    drop_times.push(now - startTime)
+                    redrawMeasure()
+                    break
+            }
+        }
+        pauseBtn.onclick = function(e) {
+            switch(state) {
+                case "STOPPED":
+                    break
+                case "STARTED":
+                    state = "PAUSED"
+                    dropBtn.disabled = true
+                    pauseBtn.innerHTML = "▶"
+                    pauseTime = Date.now()
+                    break
+                case "PAUSED":
+                    state = "STARTED"
+                    dropBtn.disabled = false
+                    pauseBtn.innerHTML = "⏸"
+                    let now = Date.now()
+                    startTime += now - pauseTime
+                    break
+            }
+        }
+        zeroBtn.onclick = function(e) {
+            switch(state) {
+                case "STOPPED":
+                    break
+                case "STARTED":
+                case "PAUSED":
+                    state = "STOPPED"
+                    dropBtn.innerHTML = "💧"
+                    pauseBtn.innerHTML = "⏸"
+                    dropBtn.disabled = false
+                    pauseBtn.disabled = true
+                    zeroBtn.disabled = true
+                    startTime = null
+                    drop_times = []
+                    redrawMeasure()
+            }
+        }
+        function calcRate(xs) {
+            if (!xs) {
+                return 0
+            }
+            return xs.length / xs[xs.length - 1]
+        }
+        function displayNumber(x) {
+            if (isNaN(x)) {
+                return (0).toFixed(1)
+            }
+            return x.toFixed(1)
+        }
+        function redrawMeasure() {
+            let drop_per_ms = calcRate(drop_times)
+            let drop_per_sec = drop_per_ms * MILLISECS_PER_SEC
+            let drop_per_min = drop_per_sec * SECS_PER_MINUTE
+            let milliliters_per_hour = drop_per_min * MINUTES_PER_HOUR / drops_per_ml()
+
+            document.getElementById("dpm").innerHTML = displayNumber(drop_per_min)
+            document.getElementById("mlph").innerHTML = displayNumber(milliliters_per_hour)
+
+            let drop_timesEl = document.getElementById("drop_times")
+            drop_timesEl.innerHTML = ""
+            for (let value of drop_times) {
+                let valueEl = document.createElement("li")
+                valueEl.innerHTML = String(value) + " ms"
+                drop_timesEl.appendChild(valueEl)
+            }
+        }
+
+        // Local Storage
+        function restoreFromLocalStorage() {
+            let tabSelector = localStorage.getItem('tab-selector-id') || 'calculator-tab-selector'
+            displayTabs(tabSelector)
+
+            let dropUnit = localStorage.getItem('drop-unit') || 'macro'
+            switch (dropUnit) {
+                case 'macro': macrodrop.checked = true; break
+                case 'micro': microdrop.checked = true; break
+            }
+            displayDropRateUnit()
+            redrawMeasure()
+        }
+        restoreFromLocalStorage()
+    </script>
+</body>
+</html>
